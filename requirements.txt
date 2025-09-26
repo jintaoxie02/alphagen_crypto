@@ -13,3 +13,5 @@ openai==1.2.3
 num2words
 requests
 yfinance
+scikit-learn
+scipy

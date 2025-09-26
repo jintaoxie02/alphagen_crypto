@@ -23,6 +23,7 @@ from alphagen.utils.random import reseed_everything
 from alphagen_generic.operators import funcs as generic_funcs
 
 from alphagen_crypto import BitcoinData, CryptoDataCalculator
+from alphagen_crypto.data_fetching import fetch_btc_ohlcv
 from alphagen_crypto.features import close, high, low, open_, target, volume, vwap  # noqa: F401
 
 
@@ -94,8 +95,8 @@ def _fetch_yfinance(start: str, end: str) -> pd.DataFrame:
     if window.empty:
         raise ValueError("No Bitcoin data retrieved for the specified window")
     return window
-
-
+  
+ 
 def _prepare_data(
     *,
     start: str,
@@ -109,7 +110,7 @@ def _prepare_data(
     if csv_path is not None:
         df = _load_csv(csv_path)
     else:
-        df = _fetch_yfinance(start, end)
+        df = fetch_btc_ohlcv(start, end)
 
     split_ts = pd.Timestamp(split)
     train_df = df.loc[df.index <= split_ts]
