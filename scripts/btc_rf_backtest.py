@@ -160,8 +160,6 @@ def _augment_with_mined_alphas(
     feature_table = feature_table.join(alpha_frame, how="inner")
     feature_table = feature_table.dropna()
     return feature_table, mining_result
-
-
 def _fit_random_forest(X_train: pd.DataFrame, y_train: pd.Series, args: argparse.Namespace) -> RandomForestRegressor:
     model = RandomForestRegressor(
         n_estimators=args.n_estimators,
