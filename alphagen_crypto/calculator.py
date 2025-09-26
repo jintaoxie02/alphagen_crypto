@@ -13,14 +13,12 @@ from alphagen.utils.pytorch_utils import normalize_by_day
 
 from .bitcoin_data import BitcoinData
 
-
 def _normalize_single_asset(value: Tensor) -> Tensor:
     if value.shape[1] <= 1:
         # For single-asset datasets we skip cross-sectional normalisation to
         # retain signal variance, simply replacing NaNs with zeros.
         return torch.nan_to_num(value, nan=0.0)
     return normalize_by_day(value)
-
 
 class CryptoDataCalculator(TensorAlphaCalculator):
     """Alpha calculator that works with :class:`BitcoinData`."""
