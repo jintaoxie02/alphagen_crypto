@@ -54,7 +54,11 @@ def fetch_btc_ohlcv(start: Optional[str] = None, end: Optional[str] = None) -> p
     if data.empty:
         raise RuntimeError("No data returned from Yahoo Finance for BTC-USD")
 
-    data = data.rename(columns=str.title)
+    if isinstance(data.columns, pd.MultiIndex):
+        data.columns = [str(col).title() for col, *_ in data.columns]
+    else:
+        data = data.rename(columns=str.title)
+
     if "Adj Close" in data.columns:
         data = data.drop(columns=["Adj Close"])
 

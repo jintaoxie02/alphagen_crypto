@@ -120,10 +120,33 @@ def run_backtest(args: argparse.Namespace) -> BacktestResult:
     train_mask = feature_table.index <= split_ts
     test_mask = feature_table.index > split_ts
 
-    if train_mask.sum() < 200:
-        raise ValueError("Training data must contain at least 200 observations")
-    if test_mask.sum() < 30:
-        raise ValueError("Test data must contain at least 30 observations")
+    train_count = int(train_mask.sum())
+    test_count = int(test_mask.sum())
+
+    if train_count < args.min_train_size:
+        required_idx = args.min_train_size - 1
+        if required_idx >= len(feature_table):
+            raise ValueError(
+                "Dataset does not contain enough rows to satisfy the minimum"
+                f" training size of {args.min_train_size}."
+            )
+        adjusted_split = feature_table.index[required_idx]
+        LOGGER.warning(
+            "Requested split %s yields only %d training rows; adjusting split to %s",
+            split_ts.date(),
+            train_count,
+            adjusted_split.date(),
+        )
+        train_mask = feature_table.index <= adjusted_split
+        test_mask = feature_table.index > adjusted_split
+        train_count = int(train_mask.sum())
+        test_count = int(test_mask.sum())
+
+    if test_count < args.min_test_size:
+        raise ValueError(
+            "Test data must contain at least"
+            f" {args.min_test_size} observations after the split"
+        )
 
     train = feature_table.loc[train_mask]
     test = feature_table.loc[test_mask]
@@ -180,6 +203,8 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument("--max-leverage", type=float, default=3.0, help="Maximum absolute leverage allowed")
     parser.add_argument("--plot-path", type=Path, default=Path("images/btc_rf_strategy.png"), help="Where to save the performance comparison plot")
     parser.add_argument("--seed", type=int, default=7, help="Random seed for the random forest")
+    parser.add_argument("--min-train-size", type=int, default=200, help="Minimum number of rows required in the training window")
+    parser.add_argument("--min-test-size", type=int, default=30, help="Minimum number of rows required in the testing window")
     parser.add_argument("--verbose", action="store_true", help="Enable verbose logging")
     return parser.parse_args(argv)
 

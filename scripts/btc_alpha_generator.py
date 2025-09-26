@@ -62,40 +62,6 @@ def _load_csv(path: Path) -> pd.DataFrame:
         raise ValueError(f"CSV file missing required columns: {sorted(missing)}")
     return df.sort_index()
 
-
-def _fetch_yfinance(start: str, end: str) -> pd.DataFrame:
-    LOGGER.info("Fetching Bitcoin OHLCV data from Yahoo Finance")
-    start_ts = pd.Timestamp(start)
-    end_ts = pd.Timestamp(end)
-
-    # yfinance treats the ``end`` argument as exclusive, so expand it by a day so
-    # that the user supplied end date is included in the window we return.
-    download_end = (end_ts + pd.Timedelta(days=1)).strftime("%Y-%m-%d")
-
-    data = yf.download(
-        "BTC-USD",
-        start=start_ts.strftime("%Y-%m-%d"),
-        end=download_end,
-        progress=False,
-        auto_adjust=False,
-        interval="1d",
-    )
-    if data.empty:
-        raise RuntimeError("No data returned from Yahoo Finance for BTC-USD")
-
-    data = data.rename(columns=str.title)
-    if "Adj Close" in data.columns:
-        data = data.drop(columns=["Adj Close"])
-
-    data.index = data.index.tz_localize(None)
-    data = data.sort_index()
-    start_filtered = pd.Timestamp(start)
-    end_filtered = pd.Timestamp(end)
-    window = data.loc[(data.index >= start_filtered) & (data.index <= end_filtered)]
-    if window.empty:
-        raise ValueError("No Bitcoin data retrieved for the specified window")
-    return window
-  
 def _prepare_data(
     *,
     start: str,
