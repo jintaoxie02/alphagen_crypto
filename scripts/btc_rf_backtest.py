@@ -6,14 +6,17 @@ import argparse
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional, Sequence
+from typing import List, Optional, Sequence, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from scipy import optimize
 from sklearn.ensemble import RandomForestRegressor
+import torch
 
+from alphagen_crypto import BitcoinData, CryptoDataCalculator
+from alphagen_crypto.alpha_mining import AlphaCandidate, AlphaMiningResult, mine_btc_alphas
 from alphagen_crypto.data_fetching import fetch_btc_ohlcv
 
 LOGGER = logging.getLogger(__name__)
@@ -26,6 +29,7 @@ class BacktestResult:
     leverage: pd.Series
     predictions: pd.Series
     realized_returns: pd.Series
+    mined_alphas: Optional[List[str]] = None
 
     @property
     def final_return(self) -> float:
@@ -79,6 +83,83 @@ def _build_feature_table(df: pd.DataFrame, lookback: int) -> pd.DataFrame:
     return frame
 
 
+def _compute_alpha_feature_frame(
+    dataframe: pd.DataFrame,
+    candidates: Sequence[AlphaCandidate],
+    *,
+    device: torch.device,
+    max_backtrack: int,
+    max_future: int,
+) -> pd.DataFrame:
+    dataset = BitcoinData(
+        dataframe,
+        max_backtrack_days=max_backtrack,
+        max_future_days=max_future,
+        device=device,
+    )
+    calculator = CryptoDataCalculator(dataset)
+    frames: List[pd.DataFrame] = []
+    for idx, candidate in enumerate(candidates, start=1):
+        tensor = calculator.evaluate_alpha(candidate.expression)
+        df = dataset.make_dataframe(tensor, columns=[f"alpha_{idx}"])
+        df = df.xs(dataset.symbol, level=1)
+        frames.append(df.rename(columns={f"alpha_{idx}": f"alpha_{idx}"}))
+    if not frames:
+        return pd.DataFrame(index=dataframe.index)
+    combined = pd.concat(frames, axis=1)
+    combined.index = pd.DatetimeIndex(combined.index)
+    combined = combined.sort_index()
+    return combined
+
+
+def _augment_with_mined_alphas(
+    dataframe: pd.DataFrame,
+    feature_table: pd.DataFrame,
+    args: argparse.Namespace,
+) -> Tuple[pd.DataFrame, Optional[AlphaMiningResult]]:
+    if args.alpha_top_n <= 0:
+        return feature_table, None
+
+    device = torch.device(args.alpha_device)
+    mining_result = mine_btc_alphas(
+        dataframe,
+        split=args.split,
+        population_size=args.alpha_population_size,
+        generations=args.alpha_generations,
+        top_n=args.alpha_top_n,
+        seed=args.seed,
+        device=device,
+        max_backtrack=args.alpha_max_backtrack,
+        max_future=args.alpha_max_future,
+        verbose=args.verbose,
+    )
+
+    if not mining_result.candidates:
+        LOGGER.warning("Alpha mining returned no candidates; continuing without additional features")
+        return feature_table, mining_result
+
+    LOGGER.info(
+        "Incorporating %d mined alphas into the feature matrix", len(mining_result.candidates)
+    )
+    for idx, candidate in enumerate(mining_result.candidates, start=1):
+        LOGGER.info(
+            "Alpha %d: %s (train IC %.3f, test IC %.3f)",
+            idx,
+            candidate.expression_str,
+            candidate.train_ic,
+            candidate.test_ic,
+        )
+
+    alpha_frame = _compute_alpha_feature_frame(
+        dataframe,
+        mining_result.candidates,
+        device=device,
+        max_backtrack=args.alpha_max_backtrack,
+        max_future=args.alpha_max_future,
+    )
+    feature_table = feature_table.join(alpha_frame, how="inner")
+    feature_table = feature_table.dropna()
+    return feature_table, mining_result
 def _fit_random_forest(X_train: pd.DataFrame, y_train: pd.Series, args: argparse.Namespace) -> RandomForestRegressor:
     model = RandomForestRegressor(
         n_estimators=args.n_estimators,
@@ -115,6 +196,10 @@ def run_backtest(args: argparse.Namespace) -> BacktestResult:
     data = fetch_btc_ohlcv(args.start, args.end)
 
     feature_table = _build_feature_table(data, args.lookback)
+
+    mining_result: Optional[AlphaMiningResult] = None
+    if not args.disable_alpha_mining:
+        feature_table, mining_result = _augment_with_mined_alphas(data, feature_table, args)
 
     split_ts = pd.Timestamp(args.split)
     train_mask = feature_table.index <= split_ts
@@ -172,6 +257,9 @@ def run_backtest(args: argparse.Namespace) -> BacktestResult:
         leverage=leverages,
         predictions=predictions,
         realized_returns=y_test,
+        mined_alphas=[candidate.expression_str for candidate in mining_result.candidates]
+        if mining_result
+        else None,
     )
 
 
@@ -205,6 +293,13 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument("--seed", type=int, default=7, help="Random seed for the random forest")
     parser.add_argument("--min-train-size", type=int, default=200, help="Minimum number of rows required in the training window")
     parser.add_argument("--min-test-size", type=int, default=30, help="Minimum number of rows required in the testing window")
+    parser.add_argument("--disable-alpha-mining", action="store_true", help="Skip mining formulaic alphas before training the model")
+    parser.add_argument("--alpha-population-size", type=int, default=200, help="Population size for the symbolic regression alpha search")
+    parser.add_argument("--alpha-generations", type=int, default=12, help="Number of generations for the symbolic regression alpha search")
+    parser.add_argument("--alpha-top-n", type=int, default=5, help="Number of mined alphas to append as features")
+    parser.add_argument("--alpha-max-backtrack", type=int, default=120, help="Maximum historical lookback used when mining alphas")
+    parser.add_argument("--alpha-max-future", type=int, default=60, help="Future horizon used when mining alphas")
+    parser.add_argument("--alpha-device", default="cpu", help="Torch device to use during alpha mining")
     parser.add_argument("--verbose", action="store_true", help="Enable verbose logging")
     return parser.parse_args(argv)
 
