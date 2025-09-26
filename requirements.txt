@@ -11,3 +11,4 @@ shimmy==1.1.0
 fire
 openai==1.2.3
 num2words
+requests
