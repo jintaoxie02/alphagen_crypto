@@ -13,12 +13,14 @@ from alphagen.utils.pytorch_utils import normalize_by_day
 
 from .bitcoin_data import BitcoinData
 
+
 def _normalize_single_asset(value: Tensor) -> Tensor:
     if value.shape[1] <= 1:
         # For single-asset datasets we skip cross-sectional normalisation to
         # retain signal variance, simply replacing NaNs with zeros.
         return torch.nan_to_num(value, nan=0.0)
     return normalize_by_day(value)
+
 
 class CryptoDataCalculator(TensorAlphaCalculator):
     """Alpha calculator that works with :class:`BitcoinData`."""
@@ -40,17 +42,36 @@ class CryptoDataCalculator(TensorAlphaCalculator):
         if mask.sum() < 2:
             return 0.0
 
-        lhs_vals = lhs_np[mask]
-        rhs_vals = rhs_np[mask]
-        lhs_std = float(np.std(lhs_vals))
-        rhs_std = float(np.std(rhs_vals))
-        if lhs_std <= 1e-12 or rhs_std <= 1e-12:
+        lhs_vals = lhs_np[mask].astype(np.float64, copy=False)
+        rhs_vals = rhs_np[mask].astype(np.float64, copy=False)
+
+        def _rescale(values: np.ndarray) -> np.ndarray:
+            max_abs = np.max(np.abs(values))
+            if not np.isfinite(max_abs) or max_abs <= 0:
+                return values
+            if max_abs > 1e6:
+                values = values / max_abs
+            return values
+
+        lhs_vals = _rescale(lhs_vals)
+        rhs_vals = _rescale(rhs_vals)
+
+        lhs_mean = lhs_vals.mean()
+        rhs_mean = rhs_vals.mean()
+        lhs_centered = lhs_vals - lhs_mean
+        rhs_centered = rhs_vals - rhs_mean
+
+        lhs_norm = np.linalg.norm(lhs_centered)
+        rhs_norm = np.linalg.norm(rhs_centered)
+        denom = lhs_norm * rhs_norm
+        if denom <= 1e-12 or not np.isfinite(denom):
             return 0.0
 
-        corr = np.corrcoef(lhs_vals, rhs_vals)[0, 1]
-        if np.isnan(corr):
+        corr = float(np.dot(lhs_centered, rhs_centered) / denom)
+        if not np.isfinite(corr):
             return 0.0
-        return float(corr)
+        return float(np.clip(corr, -1.0, 1.0))
+
 
     def _spearman(self, lhs: Tensor, rhs: Tensor) -> float:
         lhs_np = self._flatten(lhs)

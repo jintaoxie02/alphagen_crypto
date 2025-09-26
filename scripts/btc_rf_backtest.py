@@ -14,6 +14,7 @@ def _setup_logging(verbose: bool) -> None:
     level = logging.INFO if verbose else logging.WARNING
     logging.basicConfig(level=level, format="[%(levelname)s] %(message)s")
 
+
 def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--start", default="2010-07-17", help="Start date for the dataset (inclusive)")
