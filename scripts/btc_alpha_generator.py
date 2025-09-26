@@ -16,6 +16,7 @@ from gplearn.fitness import make_fitness
 from gplearn.functions import make_function
 from gplearn.genetic import SymbolicRegressor
 import yfinance as yf
+import requests
 
 from alphagen.data.expression import *  # noqa: F401,F403
 from alphagen.models.linear_alpha_pool import MseAlphaPool
@@ -27,6 +28,7 @@ from alphagen_crypto.features import close, high, low, open_, target, volume, vw
 
 
 LOGGER = logging.getLogger(__name__)
+COINGECKO_BASE = "https://api.coingecko.com/api/v3"
 @dataclass
 class AlphaResult:
     expression: str
