@@ -96,7 +96,6 @@ def _fetch_yfinance(start: str, end: str) -> pd.DataFrame:
         raise ValueError("No Bitcoin data retrieved for the specified window")
     return window
   
- 
 def _prepare_data(
     *,
     start: str,

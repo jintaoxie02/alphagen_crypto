@@ -58,8 +58,14 @@ def _build_feature_table(df: pd.DataFrame, lookback: int) -> pd.DataFrame:
     frame["vwap"] = (frame["high"] + frame["low"] + frame["close"]) / 3
 
     for window in (3, 7, 14, 30):
-        frame[f"ma_{window}"] = frame["close"].rolling(window).mean()
-        frame[f"ma_ratio_{window}"] = frame["close"] / frame[f"ma_{window}"]
+        ma_series = frame["close"].rolling(window).mean()
+        frame[f"ma_{window}"] = ma_series
+
+        ratio = frame["close"] / frame[f"ma_{window}"]
+        if isinstance(ratio, pd.DataFrame):
+            ratio = ratio.iloc[:, 0]
+        frame[f"ma_ratio_{window}"] = ratio
+
         frame[f"volatility_{window}"] = frame["return"].rolling(window).std()
 
     for lag in range(1, lookback + 1):
