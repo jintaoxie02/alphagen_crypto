@@ -28,7 +28,6 @@ from alphagen_crypto.features import close, high, low, open_, target, volume, vw
 
 
 LOGGER = logging.getLogger(__name__)
-COINGECKO_BASE = "https://api.coingecko.com/api/v3"
 @dataclass
 class AlphaResult:
     expression: str
