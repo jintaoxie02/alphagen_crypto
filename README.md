@@ -17,6 +17,31 @@ This repository contains the code for our paper *Generating Synergistic Formulai
 - `/gplearn` and `/dso` contains modified versions of our baselines;
 - `/scripts` contains several scripts for running the experiments.
 
+## Bitcoin extension
+
+The `alphagen_crypto` package in this repository reuses AlphaGen's core
+expression primitives, calculators and linear alpha pool implementations to
+mine cryptocurrency factors.  When you run
+`python -m scripts.btc_alpha_generator`, the helper constructs
+`alphagen.data.expression.Expression` trees, evaluates them via the
+`alphagen` tensor calculator API and combines the strongest signals with an
+`alphagen.models.linear_alpha_pool.MseAlphaPool` ensemble.  The command line
+output now reports the AlphaGen engine metadata so it is explicit that the
+underlying library powers the search pipeline.
+
+For an end-to-end workflow that downloads BTC-USD data, mines the strongest
+formulaic alphas and backtests a Random Forest strategy with SciPy-based
+leverage optimisation, run:
+
+```bash
+python -m scripts.btc_pipeline --help
+python -m scripts.btc_pipeline --alpha-top-n 8 --plot-path images/btc_pipeline_strategy.png --output-json runs/btc_pipeline.json
+```
+
+This pipeline script orchestrates the helper modules in `alphagen_crypto`
+so you can fetch data, discover alphas, train the model and export results
+with a single command.
+
 ## Result Reproduction
 
 Note that you can either use our builtin alpha calculation pipeline (see Choice 1), or implement an adapter to your own pipeline (see Choice 2).
