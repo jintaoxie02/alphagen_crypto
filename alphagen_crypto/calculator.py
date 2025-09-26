@@ -72,6 +72,7 @@ class CryptoDataCalculator(TensorAlphaCalculator):
             return 0.0
         return float(np.clip(corr, -1.0, 1.0))
 
+
     def _spearman(self, lhs: Tensor, rhs: Tensor) -> float:
         lhs_np = self._flatten(lhs)
         rhs_np = self._flatten(rhs)

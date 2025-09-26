@@ -35,7 +35,6 @@ def _load_csv(path: Path) -> pd.DataFrame:
         raise ValueError(f"CSV file missing required columns: {sorted(missing)}")
     return df.sort_index()
 
-
 def generate_alphas(args) -> Dict[str, object]:
     reseed_everything(args.seed)
     device = torch.device(args.device)
