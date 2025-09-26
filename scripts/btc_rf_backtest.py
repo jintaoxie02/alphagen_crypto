@@ -10,10 +10,10 @@ from typing import Optional, Sequence
 
 LOGGER = logging.getLogger(__name__)
 
-
 def _setup_logging(verbose: bool) -> None:
     level = logging.INFO if verbose else logging.WARNING
     logging.basicConfig(level=level, format="[%(levelname)s] %(message)s")
+
 
 
 def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:

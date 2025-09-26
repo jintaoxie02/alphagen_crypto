@@ -136,7 +136,6 @@ def _prepare_datasets(
     )
     return train_data, test_data
 
-
 def _evaluate_top_candidates(
     cache: Dict[str, float],
     expressions: Dict[str, Expression],
@@ -336,7 +335,6 @@ def mine_btc_alphas(
     max_depth = 4 if generations < 5 else 6
 
     rng = np.random.default_rng(seed)
-
     cache: Dict[str, float] = {}
     expr_cache: Dict[str, Expression] = {}
 
