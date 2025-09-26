@@ -15,7 +15,7 @@ import torch
 from gplearn.fitness import make_fitness
 from gplearn.functions import make_function
 from gplearn.genetic import SymbolicRegressor
-import requests
+import yfinance as yf
 
 from alphagen.data.expression import *  # noqa: F401,F403
 from alphagen.models.linear_alpha_pool import MseAlphaPool
@@ -27,9 +27,6 @@ from alphagen_crypto.features import close, high, low, open_, target, volume, vw
 
 
 LOGGER = logging.getLogger(__name__)
-COINGECKO_BASE = "https://api.coingecko.com/api/v3"
-
-
 @dataclass
 class AlphaResult:
     expression: str
@@ -65,35 +62,39 @@ def _load_csv(path: Path) -> pd.DataFrame:
     return df.sort_index()
 
 
-def _fetch_coingecko(start: str, end: str) -> pd.DataFrame:
-    start_ts = int(pd.Timestamp(start, tz="UTC").timestamp())
-    end_ts = int(pd.Timestamp(end, tz="UTC").timestamp())
-    LOGGER.info("Fetching Bitcoin OHLC data from CoinGecko: %s -> %s", start, end)
-    ohlc_resp = requests.get(
-        f"{COINGECKO_BASE}/coins/bitcoin/ohlc",
-        params={"vs_currency": "usd", "days": "max"},
-        timeout=30,
-    )
-    ohlc_resp.raise_for_status()
-    ohlc_data = pd.DataFrame(ohlc_resp.json(), columns=["timestamp", "Open", "High", "Low", "Close"])
-    ohlc_data["Date"] = pd.to_datetime(ohlc_data["timestamp"], unit="ms", utc=True).dt.tz_convert(None)
-    ohlc_data = ohlc_data.set_index("Date").sort_index()
-    ohlc_data = ohlc_data.loc[(ohlc_data.index >= start) & (ohlc_data.index <= end)]
+def _fetch_yfinance(start: str, end: str) -> pd.DataFrame:
+    LOGGER.info("Fetching Bitcoin OHLCV data from Yahoo Finance")
+    start_ts = pd.Timestamp(start)
+    end_ts = pd.Timestamp(end)
 
-    LOGGER.info("Fetching Bitcoin volume data from CoinGecko")
-    volume_resp = requests.get(
-        f"{COINGECKO_BASE}/coins/bitcoin/market_chart/range",
-        params={"vs_currency": "usd", "from": start_ts, "to": end_ts},
-        timeout=30,
+    # yfinance treats the ``end`` argument as exclusive, so expand it by a day so
+    # that the user supplied end date is included in the window we return.
+    download_end = (end_ts + pd.Timedelta(days=1)).strftime("%Y-%m-%d")
+
+    data = yf.download(
+        "BTC-USD",
+        start=start_ts.strftime("%Y-%m-%d"),
+        end=download_end,
+        progress=False,
+        auto_adjust=False,
+        interval="1d",
     )
-    volume_resp.raise_for_status()
-    volume_data = pd.DataFrame(volume_resp.json()["total_volumes"], columns=["timestamp", "Volume"])
-    volume_data["Date"] = pd.to_datetime(volume_data["timestamp"], unit="ms", utc=True).dt.tz_convert(None)
-    volume_data = volume_data.set_index("Date").sort_index()
-    volume_daily = volume_data.groupby(volume_data.index.normalize()).last()
-    merged = ohlc_data.join(volume_daily[["Volume"]], how="left")
-    merged["Volume"] = merged["Volume"].fillna(method="ffill").fillna(method="bfill")
-    return merged
+    if data.empty:
+        raise RuntimeError("No data returned from Yahoo Finance for BTC-USD")
+
+    data = data.rename(columns=str.title)
+    if "Adj Close" in data.columns:
+        data = data.drop(columns=["Adj Close"])
+
+    data.index = data.index.tz_localize(None)
+    data = data.sort_index()
+
+    start_filtered = pd.Timestamp(start)
+    end_filtered = pd.Timestamp(end)
+    window = data.loc[(data.index >= start_filtered) & (data.index <= end_filtered)]
+    if window.empty:
+        raise ValueError("No Bitcoin data retrieved for the specified window")
+    return window
 
 
 def _prepare_data(
@@ -109,10 +110,7 @@ def _prepare_data(
     if csv_path is not None:
         df = _load_csv(csv_path)
     else:
-        df = _fetch_coingecko(start, end)
-    df = df.loc[(df.index >= start) & (df.index <= end)]
-    if df.empty:
-        raise ValueError("No Bitcoin data retrieved for the specified window")
+        df = _fetch_yfinance(start, end)
 
     split_ts = pd.Timestamp(split)
     train_df = df.loc[df.index <= split_ts]
@@ -247,8 +245,9 @@ def generate_alphas(args) -> Dict[str, object]:
     estimator.fit(X_train, y_train)
 
     results, ensemble = _evaluate_cache(cache, calculator_train, calculator_test, args.top_n, device)
+    settings = vars(args).copy()
     return {
-        "settings": vars(args),
+        "settings": settings,
         "n_evaluated": len(cache),
         "alphas": [result.__dict__ for result in results],
         "ensemble": {
@@ -264,7 +263,7 @@ def generate_alphas(args) -> Dict[str, object]:
 
 def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--start", default="2014-01-01", help="Start date for the dataset (inclusive)")
+    parser.add_argument("--start", default="2010-07-17", help="Start date for the dataset (inclusive)")
     parser.add_argument("--end", default=pd.Timestamp.today().strftime("%Y-%m-%d"), help="End date for the dataset")
     parser.add_argument("--split", default="2020-01-01", help="Split date between train/test")
     parser.add_argument("--population-size", type=int, default=500, help="Population size for GP")
