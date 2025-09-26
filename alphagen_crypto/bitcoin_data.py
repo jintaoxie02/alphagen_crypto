@@ -114,8 +114,11 @@ class BitcoinData:
         if missing:
             raise ValueError(f"Dataframe missing required columns: {missing}")
 
-        values = np.stack([normalized[col_map[feature]].to_numpy(dtype=np.float32)
-                           for feature in self._features], axis=1)
+        ordered_columns = [col_map[feature] for feature in self._features]
+        # ``DataFrame.to_numpy`` keeps a consistent shape even when duplicate
+        # columns are requested, whereas stacking individual ``Series`` can
+        # produce ragged shapes if pandas returns a 2-D array for any column.
+        values = normalized.loc[:, ordered_columns].to_numpy(dtype=np.float32)
         return torch.tensor(values, dtype=torch.float32, device=device)
 
     def __getitem__(self, slc: Union[slice, str]) -> "BitcoinData":

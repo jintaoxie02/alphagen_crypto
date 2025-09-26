@@ -16,7 +16,6 @@ from gplearn.fitness import make_fitness
 from gplearn.functions import make_function
 from gplearn.genetic import SymbolicRegressor
 import yfinance as yf
-import requests
 
 from alphagen.data.expression import *  # noqa: F401,F403
 from alphagen.models.linear_alpha_pool import MseAlphaPool
@@ -65,7 +64,21 @@ def _load_csv(path: Path) -> pd.DataFrame:
 
 def _fetch_yfinance(start: str, end: str) -> pd.DataFrame:
     LOGGER.info("Fetching Bitcoin OHLCV data from Yahoo Finance")
-    data = yf.download("BTC-USD", period="max", progress=False, auto_adjust=False)
+    start_ts = pd.Timestamp(start)
+    end_ts = pd.Timestamp(end)
+
+    # yfinance treats the ``end`` argument as exclusive, so expand it by a day so
+    # that the user supplied end date is included in the window we return.
+    download_end = (end_ts + pd.Timedelta(days=1)).strftime("%Y-%m-%d")
+
+    data = yf.download(
+        "BTC-USD",
+        start=start_ts.strftime("%Y-%m-%d"),
+        end=download_end,
+        progress=False,
+        auto_adjust=False,
+        interval="1d",
+    )
     if data.empty:
         raise RuntimeError("No data returned from Yahoo Finance for BTC-USD")
 
@@ -75,7 +88,9 @@ def _fetch_yfinance(start: str, end: str) -> pd.DataFrame:
 
     data.index = data.index.tz_localize(None)
     data = data.sort_index()
-    window = data.loc[(data.index >= pd.Timestamp(start)) & (data.index <= pd.Timestamp(end))]
+    start_filtered = pd.Timestamp(start)
+    end_filtered = pd.Timestamp(end)
+    window = data.loc[(data.index >= start_filtered) & (data.index <= end_filtered)]
     if window.empty:
         raise ValueError("No Bitcoin data retrieved for the specified window")
     return window
