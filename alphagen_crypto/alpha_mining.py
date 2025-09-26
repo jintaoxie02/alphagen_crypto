@@ -4,19 +4,41 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 import pandas as pd
 import torch
-from gplearn.fitness import make_fitness
-from gplearn.functions import make_function
-from gplearn.genetic import SymbolicRegressor
 
-from alphagen.data.expression import *  # noqa: F401,F403
+from alphagen.data.expression import (  # noqa: F401
+    Abs,
+    Add,
+    Constant,
+    Corr,
+    Cov,
+    Delta,
+    Div,
+    EMA,
+    Expression,
+    Log,
+    Mad,
+    Max,
+    Mean,
+    Med,
+    Min,
+    Mul,
+    Pow,
+    Rank,
+    Ref,
+    Sign,
+    Std,
+    Sub,
+    Sum,
+    Var,
+    WMA,
+)
 from alphagen.models.linear_alpha_pool import MseAlphaPool
 from alphagen.utils.random import reseed_everything
-from alphagen_generic.operators import funcs as generic_funcs
 
 from . import BitcoinData, CryptoDataCalculator
 from .features import close, high, low, open_, target, volume, vwap  # noqa: F401
@@ -70,6 +92,16 @@ class AlphaMiningResult:
     candidates: List[AlphaCandidate]
     ensemble: AlphaEnsembleSummary
     evaluated: int
+    engine: str = "alphagen"
+
+    def to_dict(self) -> Dict[str, object]:
+        """Serialise the mining summary, including the AlphaGen engine metadata."""
+        return {
+            "engine": self.engine,
+            "evaluated": self.evaluated,
+            "candidates": [candidate.to_dict() for candidate in self.candidates],
+            "ensemble": self.ensemble.to_dict(),
+        }
 
 
 def _prepare_datasets(
@@ -104,35 +136,6 @@ def _prepare_datasets(
     )
     return train_data, test_data
 
-
-def _build_symbolic_regressor(
-    population_size: int,
-    generations: int,
-    seed: int,
-    function_set: Sequence,
-    verbose: bool,
-) -> SymbolicRegressor:
-    return SymbolicRegressor(
-        population_size=population_size,
-        generations=generations,
-        init_depth=(2, 5),
-        tournament_size=max(population_size // 2, 2),
-        stopping_criteria=1.0,
-        p_crossover=0.3,
-        p_subtree_mutation=0.1,
-        p_hoist_mutation=0.01,
-        p_point_mutation=0.1,
-        p_point_replace=0.6,
-        max_samples=0.9,
-        verbose=int(verbose),
-        parsimony_coefficient=0.0,
-        random_state=seed,
-        function_set=function_set,
-        const_range=None,
-        n_jobs=1,
-    )
-
-
 def _evaluate_top_candidates(
     cache: Dict[str, float],
     expressions: Dict[str, Expression],
@@ -164,24 +167,122 @@ def _evaluate_top_candidates(
             )
         )
 
-    pool = MseAlphaPool(
-        capacity=len(expr_objects),
-        calculator=calculator_train,
-        ic_lower_bound=None,
-        device=device,
-    )
-    pool.force_load_exprs(expr_objects)
-    train_ic, train_ric = pool.test_ensemble(calculator_train)
-    test_ic, test_ric = pool.test_ensemble(calculator_test)
-    ensemble = AlphaEnsembleSummary(
-        expressions=expr_strings,
-        weights=list(pool.weights),
-        train_ic=float(train_ic),
-        train_ric=float(train_ric),
-        test_ic=float(test_ic),
-        test_ric=float(test_ric),
-    )
+    if expr_objects:
+        pool = MseAlphaPool(
+            capacity=len(expr_objects),
+            calculator=calculator_train,
+            ic_lower_bound=None,
+            device=device,
+        )
+        pool.force_load_exprs(expr_objects)
+        train_ic, train_ric = pool.test_ensemble(calculator_train)
+        test_ic, test_ric = pool.test_ensemble(calculator_test)
+        ensemble = AlphaEnsembleSummary(
+            expressions=expr_strings,
+            weights=list(pool.weights),
+            train_ic=float(train_ic),
+            train_ric=float(train_ric),
+            test_ic=float(test_ic),
+            test_ric=float(test_ric),
+        )
+    else:
+        ensemble = AlphaEnsembleSummary(
+            expressions=[],
+            weights=[],
+            train_ic=0.0,
+            train_ric=0.0,
+            test_ic=0.0,
+            test_ric=0.0,
+        )
     return candidates, ensemble
+
+
+def _random_window(rng: np.random.Generator) -> int:
+    return int(rng.choice((3, 5, 10, 20, 30, 60, 90)))
+
+
+def _random_expression(
+    rng: np.random.Generator,
+    depth: int,
+    *,
+    constants: Sequence[float],
+    require_feature: bool = True,
+) -> Expression:
+    if depth <= 0:
+        feature_choices = (open_, high, low, close, volume, vwap)
+        return rng.choice(feature_choices)
+
+    # Bias towards using rolling operators which often provide useful structure.
+    op_choices = (
+        ["unary"] * 3
+        + ["binary"] * 3
+        + ["rolling"] * 6
+        + ["pair_rolling"] * 2
+    )
+    op_type = rng.choice(op_choices)
+
+    if op_type == "unary":
+        operand = _random_expression(rng, depth - 1, constants=constants, require_feature=require_feature)
+        return rng.choice((Abs, Log, Sign))(operand)
+
+    if op_type == "binary":
+        left = _random_expression(rng, depth - 1, constants=constants, require_feature=True)
+        right_depth = depth - 1 if rng.random() < 0.6 else 0
+        if rng.random() < 0.3:
+            right = Constant(float(rng.choice(constants)))
+        else:
+            right = _random_expression(
+                rng,
+                right_depth,
+                constants=constants,
+                require_feature=require_feature,
+            )
+        return rng.choice((Add, Sub, Mul, Div, Pow))(left, right)
+
+    if op_type == "pair_rolling":
+        window = _random_window(rng)
+        left = _random_expression(rng, depth - 1, constants=constants, require_feature=True)
+        right = _random_expression(rng, depth - 1, constants=constants, require_feature=True)
+        operator = rng.choice((Cov, Corr))
+        return operator(left, right, window)
+
+    # Rolling operator
+    window = _random_window(rng)
+    operand = _random_expression(rng, depth - 1, constants=constants, require_feature=require_feature)
+    operator = rng.choice((
+        Mean,
+        Sum,
+        Std,
+        Var,
+        Mad,
+        Max,
+        Min,
+        Med,
+        Rank,
+        Delta,
+        WMA,
+        EMA,
+        Ref,
+    ))
+    return operator(operand, window)
+
+
+def _sample_expressions(
+    rng: np.random.Generator,
+    *,
+    total: int,
+    max_depth: int,
+    constants: Sequence[float],
+) -> List[Expression]:
+    seen: Dict[str, Expression] = {}
+    attempts = 0
+    while len(seen) < total and attempts < total * 10:
+        expr = _random_expression(rng, rng.integers(1, max_depth + 1), constants=constants)
+        expr_str = str(expr)
+        if expr_str not in seen:
+            seen[expr_str] = expr
+        attempts += 1
+    return list(seen.values())
 
 
 def mine_btc_alphas(
@@ -195,7 +296,6 @@ def mine_btc_alphas(
     device: torch.device = torch.device("cpu"),
     max_backtrack: int = 120,
     max_future: int = 60,
-    function_overrides: Optional[Iterable] = None,
     constant_values: Optional[Sequence[float]] = None,
     verbose: bool = False,
 ) -> AlphaMiningResult:
@@ -212,11 +312,6 @@ def mine_btc_alphas(
 
     calculator_train = CryptoDataCalculator(train_data, target)
     calculator_test = CryptoDataCalculator(test_data, target)
-
-    if function_overrides is None:
-        function_set = [make_function(**func._asdict()) for func in generic_funcs]
-    else:
-        function_set = [make_function(**func._asdict()) for func in function_overrides]
 
     if constant_values is None:
         constant_values = (
@@ -236,41 +331,37 @@ def mine_btc_alphas(
             30.0,
         )
 
-    features = ("open_", "close", "high", "low", "volume", "vwap")
-    terminals = list(features) + [f"Constant({val})" for val in constant_values]
+    total_samples = population_size * max(1, generations)
+    max_depth = 4 if generations < 5 else 6
 
+    rng = np.random.default_rng(seed)
     cache: Dict[str, float] = {}
     expr_cache: Dict[str, Expression] = {}
 
-    def _metric(y_true, y_pred, sample_weight):  # pylint: disable=unused-argument
-        key = y_pred[0]
-        if key in cache:
-            return cache[key]
-        try:
-            expr = eval(key)
-            expr_cache[key] = expr
-            ic = calculator_train.calc_single_IC_ret(expr)
-        except Exception as exc:  # pylint: disable=broad-except
-            LOGGER.debug("Expression %s failed during evaluation: %s", key, exc)
-            ic = -1.0
-        if np.isnan(ic):
-            ic = -1.0
-        cache[key] = float(ic)
-        return cache[key]
-
-    metric = make_fitness(function=_metric, greater_is_better=True)
-    estimator = _build_symbolic_regressor(
-        population_size=population_size,
-        generations=generations,
-        seed=seed,
-        function_set=function_set,
-        verbose=verbose,
+    candidate_expressions = _sample_expressions(
+        rng,
+        total=total_samples,
+        max_depth=max_depth,
+        constants=constant_values,
     )
 
-    X_train = np.array([terminals])
-    y_train = np.array([[1]])
-    estimator.set_params(metric=metric)
-    estimator.fit(X_train, y_train)
+    for expr in candidate_expressions:
+        expr_str = str(expr)
+        if expr_str in cache:
+            continue
+        try:
+            ic = calculator_train.calc_single_IC_ret(expr)
+        except Exception as exc:  # pylint: disable=broad-except
+            LOGGER.debug("Expression %s failed during evaluation: %s", expr_str, exc)
+            continue
+        if np.isnan(ic):
+            continue
+        cache[expr_str] = float(ic)
+        expr_cache[expr_str] = expr
+
+    if not cache:
+        LOGGER.warning("No valid alpha expressions generated; returning empty result")
+        return AlphaMiningResult(candidates=[], ensemble=AlphaEnsembleSummary([], [], 0.0, 0.0, 0.0, 0.0), evaluated=0)
 
     candidates, ensemble = _evaluate_top_candidates(
         cache,

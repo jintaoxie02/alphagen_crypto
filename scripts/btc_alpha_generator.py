@@ -58,11 +58,20 @@ def generate_alphas(args) -> Dict[str, object]:
     )
 
     settings = vars(args).copy()
+    mining_summary = mining_result.to_dict()
+
+    LOGGER.info(
+        "Alpha mining completed using %s (evaluated %d expressions)",
+        mining_summary["engine"],
+        mining_summary["evaluated"],
+    )
+
     return {
         "settings": settings,
-        "n_evaluated": mining_result.evaluated,
-        "alphas": [candidate.to_dict() for candidate in mining_result.candidates],
-        "ensemble": mining_result.ensemble.to_dict(),
+        "engine": mining_summary["engine"],
+        "n_evaluated": mining_summary["evaluated"],
+        "alphas": mining_summary["candidates"],
+        "ensemble": mining_summary["ensemble"],
     }
 
 
