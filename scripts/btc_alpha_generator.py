@@ -88,7 +88,6 @@ def _fetch_yfinance(start: str, end: str) -> pd.DataFrame:
 
     data.index = data.index.tz_localize(None)
     data = data.sort_index()
-
     start_filtered = pd.Timestamp(start)
     end_filtered = pd.Timestamp(end)
     window = data.loc[(data.index >= start_filtered) & (data.index <= end_filtered)]
