@@ -335,6 +335,7 @@ def mine_btc_alphas(
     max_depth = 4 if generations < 5 else 6
 
     rng = np.random.default_rng(seed)
+
     cache: Dict[str, float] = {}
     expr_cache: Dict[str, Expression] = {}
 

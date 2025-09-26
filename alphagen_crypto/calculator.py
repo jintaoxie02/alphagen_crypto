@@ -39,7 +39,15 @@ class CryptoDataCalculator(TensorAlphaCalculator):
         mask = np.isfinite(lhs_np) & np.isfinite(rhs_np)
         if mask.sum() < 2:
             return 0.0
-        corr = np.corrcoef(lhs_np[mask], rhs_np[mask])[0, 1]
+
+        lhs_vals = lhs_np[mask]
+        rhs_vals = rhs_np[mask]
+        lhs_std = float(np.std(lhs_vals))
+        rhs_std = float(np.std(rhs_vals))
+        if lhs_std <= 1e-12 or rhs_std <= 1e-12:
+            return 0.0
+
+        corr = np.corrcoef(lhs_vals, rhs_vals)[0, 1]
         if np.isnan(corr):
             return 0.0
         return float(corr)
