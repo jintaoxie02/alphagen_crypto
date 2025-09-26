@@ -15,6 +15,7 @@ import torch
 from gplearn.fitness import make_fitness
 from gplearn.functions import make_function
 from gplearn.genetic import SymbolicRegressor
+import yfinance as yf
 
 from alphagen.data.expression import *  # noqa: F401,F403
 from alphagen.models.linear_alpha_pool import MseAlphaPool
@@ -60,7 +61,6 @@ def _load_csv(path: Path) -> pd.DataFrame:
     if missing:
         raise ValueError(f"CSV file missing required columns: {sorted(missing)}")
     return df.sort_index()
-
 
 def _prepare_data(
     *,
